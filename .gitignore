@@ -1,3 +1,5 @@
+# ----- DEFAULT BLOCKS -----
+
 # Prerequisites
 *.d
 
@@ -53,3 +55,31 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ----- ADDED BLOCKS -----
+
+# CMake & Build Artifacts
+build/
+bin/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.ninja
+*.bin
+
+# VS Code Configuration (Keep config recipes, ignore internal state)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# STM32CubeMX Temp Files
+.mxproject
+*.ioc.bak
+
+# OS Artifacts
+.DS_Store
+Thumbs.db
