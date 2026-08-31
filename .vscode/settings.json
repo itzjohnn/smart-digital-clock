@@ -1,0 +1,7 @@
+{
+  "cmake.sourceDirectory": "${workspaceFolder}/firmware",
+  "cmake.buildDirectory": "${workspaceFolder}/firmware/build",
+  "cmake.environment": {
+    "PATH": "/opt/homebrew/bin:${env:PATH}"
+  }
+}
