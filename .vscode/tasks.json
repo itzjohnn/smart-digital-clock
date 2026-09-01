@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Flash Firmware (OpenOCD)",
+      "type": "shell",
+      "command": "openocd -f board/stm32f0discovery.cfg -c 'program ${workspaceFolder}/firmware/build/Debug/firmware.elf verify reset exit'",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      }
+    }
+  ]
+}

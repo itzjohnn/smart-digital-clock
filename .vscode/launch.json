@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug STM32F0 (OpenOCD)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "cwd": "${workspaceFolder}/firmware",
+      "executable": "${workspaceFolder}/firmware/build/Debug/firmware.elf",
+      "device": "STM32F051R8",
+      "configFiles": [
+        "board/stm32f0discovery.cfg"
+      ],
+      "armToolchainPath": "/opt/homebrew/bin",
+      "runToEntryPoint": "main"
+    }
+  ]
+}

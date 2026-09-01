@@ -96,6 +96,9 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_8 | GPIO_PIN_9); // Toggle PC8 & PC9 ON & OFF
+  HAL_Delay(500); // 500 ms delay
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
