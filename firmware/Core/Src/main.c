@@ -33,6 +33,9 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#define BUZZER_PIN GPIO_PIN_3
+#define BUZZER_GPIO_PORT GPIOA
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -88,16 +91,38 @@ int main(void)
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
 
+  // Enable GPIOA clock
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+
+  // Configure PA3 as push-pull output
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = BUZZER_PIN;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(BUZZER_GPIO_PORT, &GPIO_InitStruct);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
 
-  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_8 | GPIO_PIN_9); // Toggle PC8 & PC9 ON & OFF
+// Turn ON LEDs and buzzer
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8 | GPIO_PIN_9, SET);
+  HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, SET);
+  HAL_Delay(100); // 100 ms delay
+
+  // Turn off buzzer, but leave LEDs on briefly
+  HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, RESET);
   HAL_Delay(500); // 500 ms delay
+
+  // Turn off LEDs
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8 | GPIO_PIN_9, RESET);
+  HAL_Delay(500); // 500 ms delay
+
+    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
