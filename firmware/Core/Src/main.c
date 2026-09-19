@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -52,6 +53,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+
+uint32_t adc_val = 0;
 
 /* USER CODE END PV */
 
@@ -95,6 +98,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_ADC_Init();
   /* USER CODE BEGIN 2 */
 
   // Enable GPIOA & GPIOB clocks
@@ -115,6 +119,9 @@ int main(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BUTTONS_GPIO_PORT, &GPIO_InitStruct);
 
+  // Calibrate ADC1
+  HAL_ADCEx_Calibration_Start(&hadc);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -127,8 +134,18 @@ int main(void)
     uint8_t btn3 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON3_PIN) == GPIO_PIN_RESET);
     uint8_t btn4 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON4_PIN) == GPIO_PIN_RESET);
 
-    // Blue LED (PC8): Active if Button 1 OR Button 3
-    if (btn1 || btn3)
+    // Sample ADC Channel 1 (LDR)
+    HAL_ADC_Start(&hadc);
+    if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK)
+    {
+      adc_val = HAL_ADC_GetValue(&hadc);
+    }
+    HAL_ADC_Stop(&hadc);
+
+    uint8_t is_dark = (adc_val < 1500);
+
+    // Blue LED (PC8): Active if Button 1 OR Button 3 OR dark detected
+    if (btn1 || btn3 || is_dark)
     {
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
     }
@@ -177,9 +194,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSI14;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSI14State = RCC_HSI14_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.HSI14CalibrationValue = 16;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL12;
