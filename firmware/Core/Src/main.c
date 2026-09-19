@@ -33,8 +33,14 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define BUZZER_PIN GPIO_PIN_3
-#define BUZZER_GPIO_PORT GPIOA
+#define BUZZER_PIN          GPIO_PIN_3
+#define BUZZER_GPIO_PORT    GPIOA
+
+#define BUTTON1_PIN         GPIO_PIN_0
+#define BUTTON2_PIN         GPIO_PIN_1
+#define BUTTON3_PIN         GPIO_PIN_2
+#define BUTTON4_PIN         GPIO_PIN_3
+#define BUTTONS_GPIO_PORT   GPIOB
 
 /* USER CODE END PD */
 
@@ -91,8 +97,9 @@ int main(void)
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
 
-  // Enable GPIOA clock
+  // Enable GPIOA & GPIOB clocks
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   // Configure PA3 as push-pull output
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -102,25 +109,54 @@ int main(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BUZZER_GPIO_PORT, &GPIO_InitStruct);
 
+  // Configure PB0 as digital input with internal pull-up
+  GPIO_InitStruct.Pin = BUTTON1_PIN | BUTTON2_PIN | BUTTON3_PIN | BUTTON4_PIN;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BUTTONS_GPIO_PORT, &GPIO_InitStruct);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    // Reads pin states (active-low: RESET = pressed)
+    uint8_t btn1 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON1_PIN) == GPIO_PIN_RESET);
+    uint8_t btn2 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON2_PIN) == GPIO_PIN_RESET);
+    uint8_t btn3 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON3_PIN) == GPIO_PIN_RESET);
+    uint8_t btn4 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON4_PIN) == GPIO_PIN_RESET);
 
-// Turn ON LEDs and buzzer
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8 | GPIO_PIN_9, SET);
-  HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, SET);
-  HAL_Delay(100); // 100 ms delay
+    // Blue LED (PC8): Active if Button 1 OR Button 3
+    if (btn1 || btn3)
+    {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
+    }
+    // Green LED (PC9): Active if Button 2 OR Button 3
+    if (btn2 || btn3)
+    {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
+    }
 
-  // Turn off buzzer, but leave LEDs on briefly
-  HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, RESET);
-  HAL_Delay(500); // 500 ms delay
+    // Buzzer (PA3): Active if Button 4
+    if (btn4)
+    {
+      HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
+    }
 
-  // Turn off LEDs
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8 | GPIO_PIN_9, RESET);
-  HAL_Delay(500); // 500 ms delay
+    HAL_Delay(50); // 50 ms delay
 
     /* USER CODE END WHILE */
 
