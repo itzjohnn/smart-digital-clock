@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "i2c.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -55,6 +56,10 @@
 /* USER CODE BEGIN PV */
 
 uint32_t adc_val = 0;
+
+// I2C Scanner Storage (DEBUGGER CHECK)
+uint8_t found_devices = 0;
+uint8_t detected_addrs[10] = {0};
 
 /* USER CODE END PV */
 
@@ -99,6 +104,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_ADC_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
   // Enable GPIOA & GPIOB clocks
@@ -113,7 +119,7 @@ int main(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BUZZER_GPIO_PORT, &GPIO_InitStruct);
 
-  // Configure PB0 as digital input with internal pull-up
+  // Configure PB0-PB3 as digital inputs with internal pull-ups
   GPIO_InitStruct.Pin = BUTTON1_PIN | BUTTON2_PIN | BUTTON3_PIN | BUTTON4_PIN;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
@@ -121,6 +127,44 @@ int main(void)
 
   // Calibrate ADC1
   HAL_ADCEx_Calibration_Start(&hadc);
+
+  // Scan 7-bit addresses 1 through 127
+  for (uint16_t addr = 1; addr < 128; addr++)
+  {
+    // HAL expects 7-bit addresses shifted left by 1
+    if (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(addr << 1), 2, 10) == HAL_OK)
+    {
+      if (found_devices < 10)
+      {
+        detected_addrs[found_devices++] = (uint8_t)addr;
+      }
+    }
+  }
+
+  /* Visual Pass/Fail Indication
+  // If at least 2 devices ACK (OLED and RTC), blink PC9 (Green LED) 5 times rapidly.
+  // If fewer than 2 devices reply, toggle PC8 (Blue LED) rapidly as a warning.
+  */
+  if (found_devices >= 2)
+  {
+    for (int i = 0; i < 5; i++)
+    {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
+      HAL_Delay(80);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
+      HAL_Delay(80);
+    }
+  }
+  else
+  {
+    for (int i = 0; i < 10; i++)
+    {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
+      HAL_Delay(50);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
+      HAL_Delay(50);
+    }
+  }
 
   /* USER CODE END 2 */
 
@@ -190,6 +234,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -217,6 +262,12 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_HSI;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
