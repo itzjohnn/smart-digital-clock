@@ -21,6 +21,7 @@
 #include "adc.h"
 #include "i2c.h"
 #include "gpio.h"
+#include "ds3231.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -55,11 +56,15 @@
 
 /* USER CODE BEGIN PV */
 
+// Raw 12-bit ADC reading from light-dependent resistor (LDR)
 uint32_t adc_val = 0;
 
 // I2C Scanner Storage (DEBUGGER CHECK)
 uint8_t found_devices = 0;
 uint8_t detected_addrs[10] = {0};
+
+// Live decoded timestamp snapshot polled continuously from DS3231
+DS3231_Time_t current_time;
 
 /* USER CODE END PV */
 
@@ -166,6 +171,19 @@ int main(void)
     }
   }
 
+  // Initialize clock (TEMP CHECK)
+  DS3231_Time_t init_time = 
+  { 
+    .seconds      = 50,
+    .minutes      = 59,
+    .hours        = 23,
+    .day_of_week  = 1,
+    .day_of_month = 20,
+    .month        = 9,
+    .year         = 26
+  };
+  DS3231_SetTime(&hi2c1, &init_time);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -218,6 +236,9 @@ int main(void)
     }
 
     HAL_Delay(50); // 50 ms delay
+
+    // Poll time
+    DS3231_GetTime(&hi2c1, &current_time);
 
     /* USER CODE END WHILE */
 
