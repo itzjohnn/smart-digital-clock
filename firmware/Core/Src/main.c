@@ -24,6 +24,8 @@
 #include "ds3231.h"
 #include "sh1106.h"
 
+#include <stdio.h>
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -187,33 +189,17 @@ int main(void)
 
   // Initialize OLED
     SH1106_Init(&hi2c1);
-
-    // Draw a test border around the entire display
-    for (int16_t x = 0; x < SH1106_WIDTH; x++)
-    {
-      SH1106_DrawPixel(x, 0, SH1106_COLOR_WHITE);                 // Top border
-      SH1106_DrawPixel(x, SH1106_HEIGHT - 1, SH1106_COLOR_WHITE); // Bottom border
-    }
-    for (int16_t y = 0; y < SH1106_HEIGHT; y++)
-    {
-      SH1106_DrawPixel(0, y, SH1106_COLOR_WHITE);                 // Left border
-      SH1106_DrawPixel(SH1106_WIDTH - 1, y, SH1106_COLOR_WHITE);  // Right border
-    }
-
-    // Draw an 'X' across screen to test diagonal coordinates
-    for (int16_t i = 0; i < SH1106_HEIGHT; i++)
-    {
-      SH1106_DrawPixel(i * 2, i, SH1106_COLOR_WHITE);
-      SH1106_DrawPixel((SH1106_WIDTH - 1) - (i * 2), i, SH1106_COLOR_WHITE);
-    }
-
-    // Push framebuffer to physical screen
+    SH1106_Clear();
     SH1106_UpdateScreen(&hi2c1);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  char time_str[16];
+  char date_str[16];
+  int8_t last_second = -1;
+  
   while (1)
   {
     // Reads pin states (active-low: RESET = pressed)
@@ -261,10 +247,39 @@ int main(void)
       HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
     }
 
-    HAL_Delay(50); // 50 ms delay
-
-    // Poll time
+    // Poll live time from RTC
     DS3231_GetTime(&hi2c1, &current_time);
+
+    // Only update the OLED when the second tick actually changes
+    if (current_time.seconds != last_second)
+    {
+      last_second = current_time.seconds;
+    
+      // Format strings: HH:MM:SS and MM/DD/20YY
+      sprintf(time_str, "%02d:%02d:%02d", current_time.hours, current_time.minutes, current_time.seconds);
+      sprintf(date_str, "%02d/%02d/20%02d", current_time.month, current_time.day_of_month, current_time.year);
+
+      // Draw UI onto framebuffer
+      SH1106_Clear();
+
+      // Title / Status Line
+      SH1106_SetCursor(10, 8);
+      SH1106_WriteString("SMART CLOCK", Font_7x10, SH1106_COLOR_WHITE);
+
+      // Centered Time
+      SH1106_SetCursor(36, 26);
+      SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
+
+      // Centered Date
+      SH1106_SetCursor(29, 44);
+      SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
+
+      // Push buffer into OLED
+      SH1106_UpdateScreen(&hi2c1);
+    }
+
+    // Fast responsive loop for buttons and ADC
+    HAL_Delay(20);
 
     /* USER CODE END WHILE */
 
