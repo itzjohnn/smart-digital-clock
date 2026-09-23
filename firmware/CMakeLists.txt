@@ -33,7 +33,9 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-    Core/Inc/ds3231.h)
+    Core/Inc/ds3231.h
+    Core/Inc/sh1106.h
+    Core/Src/sh1106.c)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

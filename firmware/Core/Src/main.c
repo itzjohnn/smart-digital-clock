@@ -22,6 +22,7 @@
 #include "i2c.h"
 #include "gpio.h"
 #include "ds3231.h"
+#include "sh1106.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -183,6 +184,31 @@ int main(void)
     .year         = 26
   };
   DS3231_SetTime(&hi2c1, &init_time);
+
+  // Initialize OLED
+    SH1106_Init(&hi2c1);
+
+    // Draw a test border around the entire display
+    for (int16_t x = 0; x < SH1106_WIDTH; x++)
+    {
+      SH1106_DrawPixel(x, 0, SH1106_COLOR_WHITE);                 // Top border
+      SH1106_DrawPixel(x, SH1106_HEIGHT - 1, SH1106_COLOR_WHITE); // Bottom border
+    }
+    for (int16_t y = 0; y < SH1106_HEIGHT; y++)
+    {
+      SH1106_DrawPixel(0, y, SH1106_COLOR_WHITE);                 // Left border
+      SH1106_DrawPixel(SH1106_WIDTH - 1, y, SH1106_COLOR_WHITE);  // Right border
+    }
+
+    // Draw an 'X' across screen to test diagonal coordinates
+    for (int16_t i = 0; i < SH1106_HEIGHT; i++)
+    {
+      SH1106_DrawPixel(i * 2, i, SH1106_COLOR_WHITE);
+      SH1106_DrawPixel((SH1106_WIDTH - 1) - (i * 2), i, SH1106_COLOR_WHITE);
+    }
+
+    // Push framebuffer to physical screen
+    SH1106_UpdateScreen(&hi2c1);
 
   /* USER CODE END 2 */
 
