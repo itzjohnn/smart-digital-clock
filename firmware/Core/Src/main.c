@@ -23,6 +23,7 @@
 #include "gpio.h"
 #include "ds3231.h"
 #include "sh1106.h"
+#include "dht11.h"
 
 #include <stdio.h>
 
@@ -68,6 +69,10 @@ uint8_t detected_addrs[10] = {0};
 
 // Live decoded timestamp snapshot polled continuously from DS3231
 DS3231_Time_t current_time;
+
+// Storage for climate data
+DHT11_Data_t climate_data = {0};
+HAL_StatusTypeDef dht_status = HAL_ERROR;
 
 /* USER CODE END PV */
 
@@ -192,12 +197,16 @@ int main(void)
     SH1106_Clear();
     SH1106_UpdateScreen(&hi2c1);
 
+  // Initialize DHT11 pin
+    DHT11_Init();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   char time_str[16];
   char date_str[16];
+  char climate_str[20];
   int8_t last_second = -1;
   
   while (1)
@@ -254,27 +263,43 @@ int main(void)
     if (current_time.seconds != last_second)
     {
       last_second = current_time.seconds;
+
+    // Sample DHT11 every 2 seconds
+    if (current_time.seconds % 2 == 0)
+    {
+      dht_status = DHT11_Read(&climate_data);
+    }
     
       // Format strings: HH:MM:SS and MM/DD/20YY
       sprintf(time_str, "%02d:%02d:%02d", current_time.hours, current_time.minutes, current_time.seconds);
       sprintf(date_str, "%02d/%02d/20%02d", current_time.month, current_time.day_of_month, current_time.year);
 
-      // Draw UI onto framebuffer
+      // Format climate: Temp and Humidity
+      if (dht_status == HAL_OK)
+      {
+        sprintf(climate_str, "%dC  %d%%RH", climate_data.temperature, climate_data.humidity);
+      }
+      else
+      {
+        sprintf(climate_str, "--C  --%%RH");
+      }
+
+      // Draw UI onto Framebuffer
       SH1106_Clear();
 
-      // Title / Status Line
-      SH1106_SetCursor(10, 8);
-      SH1106_WriteString("SMART CLOCK", Font_7x10, SH1106_COLOR_WHITE);
-
-      // Centered Time
-      SH1106_SetCursor(36, 26);
+      // Row 1: Time (Centered)
+      SH1106_SetCursor(36, 4);
       SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
 
-      // Centered Date
-      SH1106_SetCursor(29, 44);
+      // Row 2: Date (Centered)
+      SH1106_SetCursor(29, 22);
       SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
 
-      // Push buffer into OLED
+      // Row 3: Climate Sensor Readings (Centered)
+      SH1106_SetCursor(25, 42);
+      SH1106_WriteString(climate_str, Font_7x10, SH1106_COLOR_WHITE);
+
+      // Push buffer to OLED
       SH1106_UpdateScreen(&hi2c1);
     }
 

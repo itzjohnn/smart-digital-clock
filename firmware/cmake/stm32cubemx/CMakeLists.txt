@@ -25,6 +25,7 @@ set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/i2c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/ds3231.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sh1106.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/dht11.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/fonts.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/stm32f0xx_it.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/stm32f0xx_hal_msp.c
