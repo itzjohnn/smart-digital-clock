@@ -166,3 +166,22 @@ char SH1106_WriteString(char *str, FontDef_t font, SH1106_Color_t color)
     }
     return *str;
 }
+
+// Sets OLED contrast level (0x00 = minimum/dim, 0xFF = maximum brightness)
+HAL_StatusTypeDef SH1106_SetContrast(I2C_HandleTypeDef *hi2c, uint8_t contrast)
+{
+    // Command 0x81 initiates contrast setting, followed by 8-bit value
+    if (SH1106_WriteCommand(hi2c, 0x81) != HAL_OK)
+    {
+        return HAL_ERROR;
+    }
+    return SH1106_WriteCommand(hi2c, contrast);
+}
+
+// Controls display sleep mode (1 = display OFF/sleep, 0 = display ON/wake)
+HAL_StatusTypeDef SH1106_SetSleep(I2C_HandleTypeDef *hi2c, uint8_t enable)
+{
+    // 0xAE turns display OFF; 0xAF turns display ON
+    uint8_t cmd = enable ? 0xAE : 0xAF;
+    return SH1106_WriteCommand(hi2c, cmd);
+}

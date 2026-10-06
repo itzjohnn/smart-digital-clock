@@ -27,4 +27,8 @@ void SH1106_SetCursor(uint8_t x, uint8_t y);
 char SH1106_WriteChar(char ch, FontDef_t font, SH1106_Color_t color);
 char SH1106_WriteString(char *str, FontDef_t font, SH1106_Color_t color);
 
+// Dynamic Display Control APIs
+HAL_StatusTypeDef SH1106_SetContrast(I2C_HandleTypeDef *hi2c, uint8_t contrast);
+HAL_StatusTypeDef SH1106_SetSleep(I2C_HandleTypeDef *hi2c, uint8_t enable);
+
 #endif

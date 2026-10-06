@@ -74,6 +74,9 @@ DS3231_Time_t current_time;
 DHT11_Data_t climate_data = {0};
 HAL_StatusTypeDef dht_status = HAL_ERROR;
 
+// Current display contrast state to prevent redundant I2C bus traffic
+uint8_t current_contrast = 0x80;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -226,6 +229,29 @@ int main(void)
     HAL_ADC_Stop(&hadc);
 
     uint8_t is_dark = (adc_val < 1500);
+
+    // Dynamic OLED Contrast Control
+    // Map 12-bit ADC (0 to 4095) into 3 discrete contrast tiers
+    uint8_t target_contrast;
+    if (adc_val < 800)
+    {
+      target_contrast = 0x00; // Low light / night (absolute minimum)
+    }
+    else if (adc_val < 2200)
+    {
+      target_contrast = 0x50; // Medium / indoor ambient lighting
+    }
+    else
+    {
+      target_contrast = 0xFF; // Bright room / daylight (maximum contrast)
+    }
+
+    // Only transmit over I2C if the tier actually changed
+    if (target_contrast != current_contrast)
+    {
+      current_contrast = target_contrast;
+      SH1106_SetContrast(&hi2c1, current_contrast);
+    }
 
     // Blue LED (PC8): Active if Button 1 OR Button 3 OR dark detected
     if (btn1 || btn3 || is_dark)
