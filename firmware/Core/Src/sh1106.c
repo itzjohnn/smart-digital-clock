@@ -112,8 +112,8 @@ void SH1106_SetCursor(uint8_t x, uint8_t y)
 // Renders a single ASCII character into the framebuffer using the specified font
 char SH1106_WriteChar(char ch, FontDef_t font, SH1106_Color_t color)
 {
-    // Ignore non-printable ASCII characters below space (32) or above '~' (126)
-    if (ch < 32 || ch > 126)
+    // Ignore non-printable ASCII characters below space (32) or above '°' (127)
+    if (ch < 32 || ch > 127)
     {
         return 0;
     }

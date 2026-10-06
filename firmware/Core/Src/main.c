@@ -274,14 +274,15 @@ int main(void)
       sprintf(time_str, "%02d:%02d:%02d", current_time.hours, current_time.minutes, current_time.seconds);
       sprintf(date_str, "%02d/%02d/20%02d", current_time.month, current_time.day_of_month, current_time.year);
 
-      // Format climate: Temp and Humidity
+      // Format climate: Temperature (°F) and Humidity (%)
       if (dht_status == HAL_OK)
       {
-        sprintf(climate_str, "%dC  %d%%RH", climate_data.temperature, climate_data.humidity);
+        uint8_t temp_F = (climate_data.temperature * 9 / 5) + 32;
+        sprintf(climate_str, "%d\x7F" "F  %d%%RH", temp_F, climate_data.humidity);
       }
       else
       {
-        sprintf(climate_str, "--C  --%%RH");
+        sprintf(climate_str, "--\x7F" "F  --%%RH");
       }
 
       // Draw UI onto Framebuffer
