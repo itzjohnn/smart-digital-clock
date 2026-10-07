@@ -34,7 +34,15 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef enum
+{
+  UI_STATE_CLOCK = 0,
+  UI_STATE_SET_HOURS,
+  UI_STATE_SET_MINUTES,
+  UI_STATE_SET_MONTH,
+  UI_STATE_SET_DAY,
+  UI_STATE_SET_YEAR
+} UI_State_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -76,6 +84,17 @@ HAL_StatusTypeDef dht_status = HAL_ERROR;
 
 // Current display contrast state to prevent redundant I2C bus traffic
 uint8_t current_contrast = 0x80;
+
+// UI State Machine tracking
+UI_State_t ui_state = UI_STATE_CLOCK;
+DS3231_Time_t edit_time;
+
+// Previous button states for falling-edge detection (1 = unpressed, 0 = pressed)
+uint8_t prev_btn1 = 1;
+uint8_t prev_btn2 = 1;
+uint8_t prev_btn3 = 1;
+uint8_t prev_btn4 = 1;
+
 
 /* USER CODE END PV */
 
@@ -182,18 +201,18 @@ int main(void)
     }
   }
 
-  // Initialize clock (TEMP CHECK)
-  DS3231_Time_t init_time = 
-  { 
-    .seconds      = 50,
-    .minutes      = 59,
-    .hours        = 23,
-    .day_of_week  = 1,
-    .day_of_month = 20,
-    .month        = 9,
-    .year         = 26
-  };
-  DS3231_SetTime(&hi2c1, &init_time);
+  // // Initialize clock (TEMP CHECK)
+  // DS3231_Time_t init_time = 
+  // { 
+  //   .seconds      = 50,
+  //   .minutes      = 59,
+  //   .hours        = 23,
+  //   .day_of_week  = 1,
+  //   .day_of_month = 20,
+  //   .month        = 9,
+  //   .year         = 26
+  // };
+  // DS3231_SetTime(&hi2c1, &init_time);
 
   // Initialize OLED
     SH1106_Init(&hi2c1);
@@ -211,16 +230,31 @@ int main(void)
   char date_str[16];
   char climate_str[20];
   int8_t last_second = -1;
+  uint32_t last_blink_tick = 0;
+  uint8_t blink_state = 1; // 1 = show field, 0 = hide field (blinking)
   
   while (1)
   {
-    // Reads pin states (active-low: RESET = pressed)
-    uint8_t btn1 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON1_PIN) == GPIO_PIN_RESET);
-    uint8_t btn2 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON2_PIN) == GPIO_PIN_RESET);
-    uint8_t btn3 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON3_PIN) == GPIO_PIN_RESET);
-    uint8_t btn4 = (HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON4_PIN) == GPIO_PIN_RESET);
+    // Button Sampling & Edge Detection
+    // Read raw levels (active-low: 0 = pressed, 1 = released)
+    uint8_t raw_btn1 = HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON1_PIN);
+    uint8_t raw_btn2 = HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON2_PIN);
+    uint8_t raw_btn3 = HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON3_PIN);
+    uint8_t raw_btn4 = HAL_GPIO_ReadPin(BUTTONS_GPIO_PORT, BUTTON4_PIN);
 
-    // Sample ADC Channel 1 (LDR)
+    // Falling-edge detection: was HIGH (1), now LOW (0)
+    uint8_t btn1_pressed = (prev_btn1 == GPIO_PIN_SET && raw_btn1 == GPIO_PIN_RESET);
+    uint8_t btn2_pressed = (prev_btn2 == GPIO_PIN_SET && raw_btn2 == GPIO_PIN_RESET);
+    uint8_t btn3_pressed = (prev_btn3 == GPIO_PIN_SET && raw_btn3 == GPIO_PIN_RESET);
+    uint8_t btn4_pressed = (prev_btn4 == GPIO_PIN_SET && raw_btn4 == GPIO_PIN_RESET);
+
+    // Store history for next cycle
+    prev_btn1 = raw_btn1;
+    prev_btn2 = raw_btn2;
+    prev_btn3 = raw_btn3;
+    prev_btn4 = raw_btn4;
+
+    // Ambient Light Sampling
     HAL_ADC_Start(&hadc);
     if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK)
     {
@@ -228,22 +262,20 @@ int main(void)
     }
     HAL_ADC_Stop(&hadc);
 
-    uint8_t is_dark = (adc_val < 1500);
-
     // Dynamic OLED Contrast Control
     // Map 12-bit ADC (0 to 4095) into 3 discrete contrast tiers
     uint8_t target_contrast;
     if (adc_val < 800)
     {
-      target_contrast = 0x00; // Low light / night (absolute minimum)
+      target_contrast = 0x00; // Low light conditions
     }
     else if (adc_val < 2200)
     {
-      target_contrast = 0x50; // Medium / indoor ambient lighting
+      target_contrast = 0x50; // Indoor light conditions
     }
     else
     {
-      target_contrast = 0xFF; // Bright room / daylight (maximum contrast)
+      target_contrast = 0xFF; // Bright light conditions
     }
 
     // Only transmit over I2C if the tier actually changed
@@ -253,64 +285,212 @@ int main(void)
       SH1106_SetContrast(&hi2c1, current_contrast);
     }
 
-    // Blue LED (PC8): Active if Button 1 OR Button 3 OR dark detected
-    if (btn1 || btn3 || is_dark)
+    // UI State Transitions & Value Adjustments
+    // Button 1: Mode Cycle / Next Field
+    if (btn1_pressed)
     {
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
-    }
-    else
-    {
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
-    }
-    // Green LED (PC9): Active if Button 2 OR Button 3
-    if (btn2 || btn3)
-    {
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
-    }
-    else
-    {
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
-    }
-
-    // Buzzer (PA3): Active if Button 4
-    if (btn4)
-    {
-      HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_SET);
-    }
-    else
-    {
-      HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
-    }
-
-    // Poll live time from RTC
-    DS3231_GetTime(&hi2c1, &current_time);
-
-    // Only update the OLED when the second tick actually changes
-    if (current_time.seconds != last_second)
-    {
-      last_second = current_time.seconds;
-
-    // Sample DHT11 every 2 seconds
-    if (current_time.seconds % 2 == 0)
-    {
-      dht_status = DHT11_Read(&climate_data);
-    }
-    
-      // Format strings: HH:MM:SS and MM/DD/20YY
-      sprintf(time_str, "%02d:%02d:%02d", current_time.hours, current_time.minutes, current_time.seconds);
-      sprintf(date_str, "%02d/%02d/20%02d", current_time.month, current_time.day_of_month, current_time.year);
-
-      // Format climate: Temperature (°F) and Humidity (%)
-      if (dht_status == HAL_OK)
+      if (ui_state == UI_STATE_CLOCK)
       {
-        uint8_t temp_F = (climate_data.temperature * 9 / 5) + 32;
-        sprintf(climate_str, "%d\x7F" "F  %d%%RH", temp_F, climate_data.humidity);
+        // Enter edit mode: freeze live time into edit buffer
+        edit_time = current_time;
+        ui_state = UI_STATE_SET_HOURS;
+      }
+      else if (ui_state == UI_STATE_SET_HOURS)
+      {
+        ui_state = UI_STATE_SET_MINUTES;
+      }
+      else if (ui_state == UI_STATE_SET_MINUTES)
+      {
+        ui_state = UI_STATE_SET_MONTH;
+      }
+      else if (ui_state == UI_STATE_SET_MONTH)
+      {
+        ui_state = UI_STATE_SET_DAY;
+      }
+      else if (ui_state == UI_STATE_SET_DAY)
+      {
+        ui_state = UI_STATE_SET_YEAR;
+      }
+      else if (ui_state == UI_STATE_SET_YEAR)
+      {
+        ui_state = UI_STATE_SET_HOURS; // Wrap around edit fields
+      }
+      blink_state = 1;
+      last_blink_tick = HAL_GetTick();
+    }
+
+    // Button 2: Increment (+1)
+    if (btn2_pressed && ui_state != UI_STATE_CLOCK)
+    {
+      switch (ui_state)
+      {
+        case UI_STATE_SET_HOURS:
+          edit_time.hours = (edit_time.hours + 1) % 24;
+          break;
+        case UI_STATE_SET_MINUTES:
+          edit_time.minutes = (edit_time.minutes + 1) % 60;
+          break;
+        case UI_STATE_SET_MONTH:
+          edit_time.month = (edit_time.month >= 12) ? 1 : edit_time.month + 1;
+          break;
+        case UI_STATE_SET_DAY:
+          edit_time.day_of_month = (edit_time.day_of_month >= 31) ? 1 : edit_time.day_of_month + 1;
+          break;
+        case UI_STATE_SET_YEAR:
+        edit_time.year = (edit_time.year + 1) % 100;
+        break;
+      default:
+        break;
+      }
+      blink_state = 1;
+      last_blink_tick = HAL_GetTick();
+    }
+
+    // Button 3: Decrement (-1)
+    if (btn3_pressed && ui_state != UI_STATE_CLOCK)
+    {
+      switch (ui_state)
+      {
+        case UI_STATE_SET_HOURS:
+          edit_time.hours = (edit_time.hours == 0) ? 23 : edit_time.hours - 1;
+          break;
+        case UI_STATE_SET_MINUTES:
+          edit_time.minutes = (edit_time.minutes == 0) ? 59 : edit_time.minutes - 1;
+          break;
+        case UI_STATE_SET_MONTH:
+          edit_time.month = (edit_time.month <= 1) ? 12 : edit_time.month - 1;
+          break;
+        case UI_STATE_SET_DAY:
+          edit_time.day_of_month = (edit_time.day_of_month <= 1) ? 31 : edit_time.day_of_month - 1;
+          break;
+        case UI_STATE_SET_YEAR:
+          edit_time.year = (edit_time.year == 0) ? 99 : edit_time.year - 1;
+          break;
+        default:
+          break;
+      }
+      blink_state = 1;
+      last_blink_tick = HAL_GetTick();
+    }
+
+    // Button 4: Save & Exit in Edit Mode, Beep in Clock Mode
+    if (btn4_pressed)
+    {
+      if (ui_state != UI_STATE_CLOCK)
+      {
+        // Reset seconds to 00 on commit and save to RTC
+        edit_time.seconds = 0;
+        DS3231_SetTime(&hi2c1, &edit_time);
+        current_time = edit_time;
+        ui_state = UI_STATE_CLOCK;
+
+        // Confirmation beep
+        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_SET);
+        HAL_Delay(60);
+        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
       }
       else
       {
-        sprintf(climate_str, "--\x7F" "F  --%%RH");
+        // Simple tactile beep in normal clock mode
+        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_SET);
+        HAL_Delay(30);
+        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
+      }
+    }
+
+    // Display & Rendering Pipeline
+    if (ui_state == UI_STATE_CLOCK)
+    {
+      // Poll live time from RTC
+      DS3231_GetTime(&hi2c1, &current_time);
+
+      // Only update the OLED when the second tick actually changes
+      if (current_time.seconds != last_second)
+      {
+        last_second = current_time.seconds;
+
+        // Sample DHT11 every 2 seconds
+        if (current_time.seconds % 2 == 0)
+        {
+          dht_status = DHT11_Read(&climate_data);
+        }
+    
+        // Format strings: HH:MM:SS and MM/DD/20YY
+        sprintf(time_str, "%02d:%02d:%02d", current_time.hours, current_time.minutes, current_time.seconds);
+        sprintf(date_str, "%02d/%02d/20%02d", current_time.month, current_time.day_of_month, current_time.year);
+
+        // Format climate: Temperature (°F) and Humidity (%)
+        if (dht_status == HAL_OK)
+        {
+          uint8_t temp_F = (climate_data.temperature * 9 / 5) + 32;
+         sprintf(climate_str, "%d\x7F" "F  %d%%RH", temp_F, climate_data.humidity);
+        }
+        else
+        {
+          sprintf(climate_str, "--\x7F" "F  --%%RH");
+        }
+
+        SH1106_Clear();
+
+        // Row 1: Time (Centered)
+        SH1106_SetCursor(36, 4);
+        SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
+
+        // Row 2: Date (Centered)
+        SH1106_SetCursor(29, 22);
+        SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
+
+        // Row 3: Climate Sensor Readings (Centered)
+        SH1106_SetCursor(25, 42);
+        SH1106_WriteString(climate_str, Font_7x10, SH1106_COLOR_WHITE);
+
+        // Push buffer to OLED
+        SH1106_UpdateScreen(&hi2c1);
+      }
+    }
+    else
+    {
+      // EDIT MODE: blink active field every 300 ms
+      if (HAL_GetTick() - last_blink_tick >= 300)
+      {
+        last_blink_tick = HAL_GetTick();
+        blink_state = !blink_state;
       }
 
+      // Format Time string with blinking field
+      char hrs_buf[3], mins_buf[3];
+      if (ui_state == UI_STATE_SET_HOURS && !blink_state)
+        sprintf(hrs_buf, "  ");
+      else
+        sprintf(hrs_buf, "%02d", edit_time.hours);
+
+      if (ui_state == UI_STATE_SET_MINUTES && !blink_state)
+        sprintf(mins_buf, "  ");
+      else
+        sprintf(mins_buf, "%02d", edit_time.minutes);
+
+      sprintf(time_str, "%s:%s:--", hrs_buf, mins_buf);
+
+      // Format Data string with blinking field
+      char mo_buf[3], day_buf[3], yr_buf[3];
+      if (ui_state == UI_STATE_SET_MONTH && !blink_state)
+        sprintf(mo_buf, "  ");
+      else
+        sprintf(mo_buf, "%02d", edit_time.month);
+
+      if (ui_state == UI_STATE_SET_DAY && !blink_state)
+        sprintf(day_buf, "  ");
+      else
+        sprintf(day_buf, "%02d", edit_time.day_of_month);
+        
+      if (ui_state == UI_STATE_SET_YEAR && !blink_state)
+        sprintf(yr_buf, "  ");
+      else
+        sprintf(yr_buf, "%02d", edit_time.year);
+
+      sprintf(date_str, "%s/%s/20%s", mo_buf, day_buf, yr_buf);
+
+      // Render Edit Mode UI
       // Draw UI onto Framebuffer
       SH1106_Clear();
 
@@ -322,15 +502,15 @@ int main(void)
       SH1106_SetCursor(29, 22);
       SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
 
-      // Row 3: Climate Sensor Readings (Centered)
-      SH1106_SetCursor(25, 42);
-      SH1106_WriteString(climate_str, Font_7x10, SH1106_COLOR_WHITE);
+      // Bottom Row: Guidance Label
+      SH1106_SetCursor(22, 42);
+      SH1106_WriteString("[SET TIME]", Font_7x10, SH1106_COLOR_WHITE);
 
       // Push buffer to OLED
       SH1106_UpdateScreen(&hi2c1);
     }
 
-    // Fast responsive loop for buttons and ADC
+    // Fast responsive polling delay for tactile switch debounce
     HAL_Delay(20);
 
     /* USER CODE END WHILE */
