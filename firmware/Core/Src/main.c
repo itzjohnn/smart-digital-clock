@@ -24,6 +24,7 @@
 #include "ds3231.h"
 #include "sh1106.h"
 #include "dht11.h"
+#include "ui.h"
 
 #include <stdio.h>
 
@@ -34,15 +35,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef enum
-{
-  UI_STATE_CLOCK = 0,
-  UI_STATE_SET_HOURS,
-  UI_STATE_SET_MINUTES,
-  UI_STATE_SET_MONTH,
-  UI_STATE_SET_DAY,
-  UI_STATE_SET_YEAR
-} UI_State_t;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -84,10 +77,6 @@ HAL_StatusTypeDef dht_status = HAL_ERROR;
 
 // Current display contrast state to prevent redundant I2C bus traffic
 uint8_t current_contrast = 0x80;
-
-// UI State Machine tracking
-UI_State_t ui_state = UI_STATE_CLOCK;
-DS3231_Time_t edit_time;
 
 // Previous button states for falling-edge detection (1 = unpressed, 0 = pressed)
 uint8_t prev_btn1 = 1;
@@ -201,19 +190,6 @@ int main(void)
     }
   }
 
-  // // Initialize clock (TEMP CHECK)
-  // DS3231_Time_t init_time = 
-  // { 
-  //   .seconds      = 50,
-  //   .minutes      = 59,
-  //   .hours        = 23,
-  //   .day_of_week  = 1,
-  //   .day_of_month = 20,
-  //   .month        = 9,
-  //   .year         = 26
-  // };
-  // DS3231_SetTime(&hi2c1, &init_time);
-
   // Initialize OLED
     SH1106_Init(&hi2c1);
     SH1106_Clear();
@@ -222,17 +198,15 @@ int main(void)
   // Initialize DHT11 pin
     DHT11_Init();
 
+  // Initialize UI module
+    UI_Init(&hi2c1);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  char time_str[16];
-  char date_str[16];
-  char climate_str[20];
   int8_t last_second = -1;
-  uint32_t last_blink_tick = 0;
-  uint8_t blink_state = 1; // 1 = show field, 0 = hide field (blinking)
-  
+
   while (1)
   {
     // Button Sampling & Edge Detection
@@ -254,7 +228,10 @@ int main(void)
     prev_btn3 = raw_btn3;
     prev_btn4 = raw_btn4;
 
-    // Ambient Light Sampling
+    // Send button events to UI state machine
+    UI_ProcessButtons(btn1_pressed, btn2_pressed, btn3_pressed, btn4_pressed);
+
+    // Ambient Light & Dynamic Display Contrast
     HAL_ADC_Start(&hadc);
     if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK)
     {
@@ -262,20 +239,19 @@ int main(void)
     }
     HAL_ADC_Stop(&hadc);
 
-    // Dynamic OLED Contrast Control
     // Map 12-bit ADC (0 to 4095) into 3 discrete contrast tiers
     uint8_t target_contrast;
     if (adc_val < 800)
     {
-      target_contrast = 0x00; // Low light conditions
+      target_contrast = 0x00;
     }
     else if (adc_val < 2200)
     {
-      target_contrast = 0x50; // Indoor light conditions
+      target_contrast = 0x50;
     }
     else
     {
-      target_contrast = 0xFF; // Bright light conditions
+      target_contrast = 0xFF;
     }
 
     // Only transmit over I2C if the tier actually changed
@@ -285,121 +261,8 @@ int main(void)
       SH1106_SetContrast(&hi2c1, current_contrast);
     }
 
-    // UI State Transitions & Value Adjustments
-    // Button 1: Mode Cycle / Next Field
-    if (btn1_pressed)
-    {
-      if (ui_state == UI_STATE_CLOCK)
-      {
-        // Enter edit mode: freeze live time into edit buffer
-        edit_time = current_time;
-        ui_state = UI_STATE_SET_HOURS;
-      }
-      else if (ui_state == UI_STATE_SET_HOURS)
-      {
-        ui_state = UI_STATE_SET_MINUTES;
-      }
-      else if (ui_state == UI_STATE_SET_MINUTES)
-      {
-        ui_state = UI_STATE_SET_MONTH;
-      }
-      else if (ui_state == UI_STATE_SET_MONTH)
-      {
-        ui_state = UI_STATE_SET_DAY;
-      }
-      else if (ui_state == UI_STATE_SET_DAY)
-      {
-        ui_state = UI_STATE_SET_YEAR;
-      }
-      else if (ui_state == UI_STATE_SET_YEAR)
-      {
-        ui_state = UI_STATE_SET_HOURS; // Wrap around edit fields
-      }
-      blink_state = 1;
-      last_blink_tick = HAL_GetTick();
-    }
-
-    // Button 2: Increment (+1)
-    if (btn2_pressed && ui_state != UI_STATE_CLOCK)
-    {
-      switch (ui_state)
-      {
-        case UI_STATE_SET_HOURS:
-          edit_time.hours = (edit_time.hours + 1) % 24;
-          break;
-        case UI_STATE_SET_MINUTES:
-          edit_time.minutes = (edit_time.minutes + 1) % 60;
-          break;
-        case UI_STATE_SET_MONTH:
-          edit_time.month = (edit_time.month >= 12) ? 1 : edit_time.month + 1;
-          break;
-        case UI_STATE_SET_DAY:
-          edit_time.day_of_month = (edit_time.day_of_month >= 31) ? 1 : edit_time.day_of_month + 1;
-          break;
-        case UI_STATE_SET_YEAR:
-        edit_time.year = (edit_time.year + 1) % 100;
-        break;
-      default:
-        break;
-      }
-      blink_state = 1;
-      last_blink_tick = HAL_GetTick();
-    }
-
-    // Button 3: Decrement (-1)
-    if (btn3_pressed && ui_state != UI_STATE_CLOCK)
-    {
-      switch (ui_state)
-      {
-        case UI_STATE_SET_HOURS:
-          edit_time.hours = (edit_time.hours == 0) ? 23 : edit_time.hours - 1;
-          break;
-        case UI_STATE_SET_MINUTES:
-          edit_time.minutes = (edit_time.minutes == 0) ? 59 : edit_time.minutes - 1;
-          break;
-        case UI_STATE_SET_MONTH:
-          edit_time.month = (edit_time.month <= 1) ? 12 : edit_time.month - 1;
-          break;
-        case UI_STATE_SET_DAY:
-          edit_time.day_of_month = (edit_time.day_of_month <= 1) ? 31 : edit_time.day_of_month - 1;
-          break;
-        case UI_STATE_SET_YEAR:
-          edit_time.year = (edit_time.year == 0) ? 99 : edit_time.year - 1;
-          break;
-        default:
-          break;
-      }
-      blink_state = 1;
-      last_blink_tick = HAL_GetTick();
-    }
-
-    // Button 4: Save & Exit in Edit Mode, Beep in Clock Mode
-    if (btn4_pressed)
-    {
-      if (ui_state != UI_STATE_CLOCK)
-      {
-        // Reset seconds to 00 on commit and save to RTC
-        edit_time.seconds = 0;
-        DS3231_SetTime(&hi2c1, &edit_time);
-        current_time = edit_time;
-        ui_state = UI_STATE_CLOCK;
-
-        // Confirmation beep
-        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_SET);
-        HAL_Delay(60);
-        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
-      }
-      else
-      {
-        // Simple tactile beep in normal clock mode
-        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_SET);
-        HAL_Delay(30);
-        HAL_GPIO_WritePin(BUZZER_GPIO_PORT, BUZZER_PIN, GPIO_PIN_RESET);
-      }
-    }
-
-    // Display & Rendering Pipeline
-    if (ui_state == UI_STATE_CLOCK)
+    // Telemetry Sampling (Clock Mode Only)
+    if (UI_GetState() == UI_STATE_CLOCK)
     {
       // Poll live time from RTC
       DS3231_GetTime(&hi2c1, &current_time);
@@ -414,103 +277,13 @@ int main(void)
         {
           dht_status = DHT11_Read(&climate_data);
         }
-    
-        // Format strings: HH:MM:SS and MM/DD/20YY
-        sprintf(time_str, "%02d:%02d:%02d", current_time.hours, current_time.minutes, current_time.seconds);
-        sprintf(date_str, "%02d/%02d/20%02d", current_time.month, current_time.day_of_month, current_time.year);
-
-        // Format climate: Temperature (°F) and Humidity (%)
-        if (dht_status == HAL_OK)
-        {
-          uint8_t temp_F = (climate_data.temperature * 9 / 5) + 32;
-         sprintf(climate_str, "%d\x7F" "F  %d%%RH", temp_F, climate_data.humidity);
-        }
-        else
-        {
-          sprintf(climate_str, "--\x7F" "F  --%%RH");
-        }
-
-        SH1106_Clear();
-
-        // Row 1: Time (Centered)
-        SH1106_SetCursor(36, 4);
-        SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
-
-        // Row 2: Date (Centered)
-        SH1106_SetCursor(29, 22);
-        SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
-
-        // Row 3: Climate Sensor Readings (Centered)
-        SH1106_SetCursor(25, 42);
-        SH1106_WriteString(climate_str, Font_7x10, SH1106_COLOR_WHITE);
-
-        // Push buffer to OLED
-        SH1106_UpdateScreen(&hi2c1);
       }
     }
-    else
-    {
-      // EDIT MODE: blink active field every 300 ms
-      if (HAL_GetTick() - last_blink_tick >= 300)
-      {
-        last_blink_tick = HAL_GetTick();
-        blink_state = !blink_state;
-      }
 
-      // Format Time string with blinking field
-      char hrs_buf[3], mins_buf[3];
-      if (ui_state == UI_STATE_SET_HOURS && !blink_state)
-        sprintf(hrs_buf, "  ");
-      else
-        sprintf(hrs_buf, "%02d", edit_time.hours);
+    // Render Active Screen
+    UI_Update(&current_time, &climate_data, dht_status);
 
-      if (ui_state == UI_STATE_SET_MINUTES && !blink_state)
-        sprintf(mins_buf, "  ");
-      else
-        sprintf(mins_buf, "%02d", edit_time.minutes);
-
-      sprintf(time_str, "%s:%s:--", hrs_buf, mins_buf);
-
-      // Format Data string with blinking field
-      char mo_buf[3], day_buf[3], yr_buf[3];
-      if (ui_state == UI_STATE_SET_MONTH && !blink_state)
-        sprintf(mo_buf, "  ");
-      else
-        sprintf(mo_buf, "%02d", edit_time.month);
-
-      if (ui_state == UI_STATE_SET_DAY && !blink_state)
-        sprintf(day_buf, "  ");
-      else
-        sprintf(day_buf, "%02d", edit_time.day_of_month);
-        
-      if (ui_state == UI_STATE_SET_YEAR && !blink_state)
-        sprintf(yr_buf, "  ");
-      else
-        sprintf(yr_buf, "%02d", edit_time.year);
-
-      sprintf(date_str, "%s/%s/20%s", mo_buf, day_buf, yr_buf);
-
-      // Render Edit Mode UI
-      // Draw UI onto Framebuffer
-      SH1106_Clear();
-
-      // Row 1: Time (Centered)
-      SH1106_SetCursor(36, 4);
-      SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
-
-      // Row 2: Date (Centered)
-      SH1106_SetCursor(29, 22);
-      SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
-
-      // Bottom Row: Guidance Label
-      SH1106_SetCursor(22, 42);
-      SH1106_WriteString("[SET TIME]", Font_7x10, SH1106_COLOR_WHITE);
-
-      // Push buffer to OLED
-      SH1106_UpdateScreen(&hi2c1);
-    }
-
-    // Fast responsive polling delay for tactile switch debounce
+    // Fast responsive polling delay for tactile debounce
     HAL_Delay(20);
 
     /* USER CODE END WHILE */
