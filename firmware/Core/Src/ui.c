@@ -32,12 +32,30 @@ static uint32_t last_blink_tick = 0;
 static uint8_t blink_state = 1;
 static int8_t last_second = -1;
 
+// Alarm instance (default 7:00, disabled)
+static Alarm_t alarm =
+{
+    .hours = 7,
+    .minutes = 0,
+    .enabled = 0,
+    .triggered = 0
+};
+
+// Working edit buffer for alarm setup
+static Alarm_t edit_alarm;
+
+// Buzzer cadence tracking (non-blocking)
+static uint32_t last_buzzer_tick = 0;
+static uint8_t buzzer_cadence_state = 0;
+static int8_t last_alarm_trigger_min = -1;
+
 void UI_Init(I2C_HandleTypeDef *hi2c)
 {
     ui_i2c = hi2c;
     ui_state = UI_STATE_CLOCK;
     blink_state = 1;
     last_second = -1;
+    edit_alarm = alarm;
 }
 
 UI_State_t UI_GetState(void)
@@ -45,9 +63,55 @@ UI_State_t UI_GetState(void)
     return ui_state;
 }
 
+uint8_t UI_IsAlarmTriggered(void)
+{
+    return alarm.triggered;
+}
+
+// Checks if current time matches alarm target (evaluates on second 00)
+void UI_CheckAlarm(const DS3231_Time_t *current_time)
+{
+    if (alarm.enabled && !alarm.triggered)
+    {
+        if (current_time->seconds == 0 &&
+            current_time->hours == alarm.hours &&
+            current_time->minutes == alarm.minutes &&
+            current_time->minutes != last_alarm_trigger_min)
+        {
+            alarm.triggered = 1;
+            last_alarm_trigger_min = current_time->minutes;
+            last_buzzer_tick = HAL_GetTick();
+            buzzer_cadence_state = 1;
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+        }
+    }
+}
+
+// Non-blocking buzzer cadence: 150 ms ON, 150 ms OFF
+void UI_ServiceAlarmBuzzer(void)
+{
+    if (alarm.triggered)
+    {
+        if (HAL_GetTick() - last_buzzer_tick >= 150)
+        {
+            last_buzzer_tick = HAL_GetTick();
+            buzzer_cadence_state = !buzzer_cadence_state;
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, buzzer_cadence_state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        }
+    }
+}
+
 void UI_ProcessButtons(uint8_t btn1_pressed, uint8_t btn2_pressed,
                        uint8_t btn3_pressed, uint8_t btn4_pressed)
 {
+    // Any button press silences an active alarm
+    if (alarm.triggered && (btn1_pressed || btn2_pressed || btn3_pressed || btn4_pressed))
+    {
+        alarm.triggered = 0;
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+        return;
+    }
+
     // Button 1: Mode Cycle / Next Field
     if (btn1_pressed)
     {
@@ -55,6 +119,7 @@ void UI_ProcessButtons(uint8_t btn1_pressed, uint8_t btn2_pressed,
         {
             // Enter edit mode: freeze live time into edit buffer
             DS3231_GetTime(ui_i2c, &edit_time);
+            edit_alarm = alarm;
             ui_state = UI_STATE_SET_HOURS;
         }
         else if (ui_state == UI_STATE_SET_HOURS)
@@ -75,7 +140,19 @@ void UI_ProcessButtons(uint8_t btn1_pressed, uint8_t btn2_pressed,
         }
         else if (ui_state == UI_STATE_SET_YEAR)
         {
-            ui_state = UI_STATE_SET_HOURS; // Wrap around edit fields
+            ui_state = UI_STATE_SET_ALARM_HOURS;
+        }
+        else if (ui_state == UI_STATE_SET_ALARM_HOURS)
+        {
+            ui_state = UI_STATE_SET_ALARM_MINUTES;
+        }
+        else if (ui_state == UI_STATE_SET_ALARM_MINUTES)
+        {
+            ui_state = UI_STATE_SET_ALARM_ENABLE;
+        }
+        else if (ui_state == UI_STATE_SET_ALARM_ENABLE)
+        {
+            ui_state = UI_STATE_SET_HOURS; // Wrap around to time edit
         }
         blink_state = 1;
         last_blink_tick = HAL_GetTick();
@@ -100,6 +177,15 @@ void UI_ProcessButtons(uint8_t btn1_pressed, uint8_t btn2_pressed,
                 break;
             case UI_STATE_SET_YEAR:
                 edit_time.year = (edit_time.year + 1) % 100;
+                break;
+            case UI_STATE_SET_ALARM_HOURS:
+                edit_alarm.hours = (edit_alarm.hours + 1) % 24;
+                break;
+            case UI_STATE_SET_ALARM_MINUTES:
+                edit_alarm.minutes = (edit_alarm.minutes + 1) % 60;
+                break;
+            case UI_STATE_SET_ALARM_ENABLE:
+                edit_alarm.enabled = !edit_alarm.enabled;
                 break;
             default:
                 break;
@@ -128,6 +214,15 @@ void UI_ProcessButtons(uint8_t btn1_pressed, uint8_t btn2_pressed,
             case UI_STATE_SET_YEAR:
                 edit_time.year = (edit_time.year == 0) ? 99 : edit_time.year - 1;
                 break;
+            case UI_STATE_SET_ALARM_HOURS:
+                edit_alarm.hours = (edit_alarm.hours == 0) ? 23 : edit_alarm.hours - 1;
+                break;
+            case UI_STATE_SET_ALARM_MINUTES:
+                edit_alarm.minutes = (edit_alarm.minutes == 0) ? 59 : edit_alarm.minutes - 1;
+                break;
+            case UI_STATE_SET_ALARM_ENABLE:
+                edit_alarm.enabled = !edit_alarm.enabled;
+                break;
             default:
                 break;
         }
@@ -146,6 +241,9 @@ void UI_ProcessButtons(uint8_t btn1_pressed, uint8_t btn2_pressed,
                                                           edit_time.month, 
                                                           2000 + edit_time.year) + 1;
             DS3231_SetTime(ui_i2c, &edit_time);
+
+            // Commit alarm settings
+            alarm = edit_alarm;
             ui_state = UI_STATE_CLOCK;
 
             // Confirmation beep
@@ -171,16 +269,25 @@ void UI_Update(const DS3231_Time_t *current_time, const DHT11_Data_t *climate, H
 
     if (ui_state == UI_STATE_CLOCK)
     {
-        // Only refresh the OLED when the second tick changes
-        if (current_time->seconds != last_second)
+        // When alarm is triggered, refresh on every tick for alert feedback
+        if (current_time->seconds != last_second || alarm.triggered)
         {
             last_second = current_time->seconds;
 
             uint8_t dow = UI_CalculateDayOfWeek(current_time->day_of_month, 
                                                  current_time->month, 
                                                  2000 + current_time->year);
-
+            
+            // Show alarm indicator if enabled
+            if (alarm.enabled)
+            {
+                sprintf(time_str, "%02d:%02d:%02d *", current_time->hours, current_time->minutes, current_time->seconds);
+            }
+            else
+            {
             sprintf(time_str, "%02d:%02d:%02d", current_time->hours, current_time->minutes, current_time->seconds);
+            }
+
             sprintf(date_str, "%s  %02d/%02d/%02d", DAY_NAMES[dow], current_time->month, current_time->day_of_month, current_time->year);
 
             if (dht_status == HAL_OK)
@@ -196,23 +303,32 @@ void UI_Update(const DS3231_Time_t *current_time, const DHT11_Data_t *climate, H
             SH1106_Clear();
 
             // Row 1: Time (Centered)
-            SH1106_SetCursor(36, 4);
+            uint8_t time_x = alarm.enabled ? 30 : 36;
+            SH1106_SetCursor(time_x, 4);
             SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
 
             // Row 2: Date (Centered)
             SH1106_SetCursor(18, 22);
             SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
 
-            // Row 3: Climate Sensor Readings (Centered)
-            SH1106_SetCursor(25, 42);
-            SH1106_WriteString(climate_str, Font_7x10, SH1106_COLOR_WHITE);
+            // Row 3: Climate Sensor Readings or Alarm Alert (Centered)
+            if (alarm.triggered)
+            {
+                SH1106_SetCursor(22, 42);
+                SH1106_WriteString("! ALARM RING !", Font_7x10, SH1106_COLOR_WHITE);
+            }
+            else
+            {
+                SH1106_SetCursor(25, 42);
+                SH1106_WriteString(climate_str, Font_7x10, SH1106_COLOR_WHITE);
+            }
 
             SH1106_UpdateScreen(ui_i2c);
         }
     }
-    else
+    else if (ui_state <= UI_STATE_SET_YEAR)
     {
-        // EDIT MODE: blink active field every 300 ms
+        // CLOCK EDIT MODE (Time and Date): blink active field every 300 ms
         if (HAL_GetTick() - last_blink_tick >= 300)
         {
             last_blink_tick = HAL_GetTick();
@@ -267,6 +383,46 @@ void UI_Update(const DS3231_Time_t *current_time, const DHT11_Data_t *climate, H
 
         SH1106_SetCursor(22, 42);
         SH1106_WriteString("[SET TIME]", Font_7x10, SH1106_COLOR_WHITE);
+
+        SH1106_UpdateScreen(ui_i2c);
+    }
+    else
+    {
+        // Alarm Edit Mode
+        if (HAL_GetTick() - last_blink_tick >= 300)
+        {
+            last_blink_tick = HAL_GetTick();
+            blink_state = !blink_state;
+        }
+
+        char a_hrs_buf[4], a_mins_buf[4], a_en_buf[6];
+        if (ui_state == UI_STATE_SET_ALARM_HOURS && !blink_state)
+            sprintf(a_hrs_buf, "  ");
+        else
+            sprintf(a_hrs_buf, "%02d", edit_alarm.hours);
+
+        if (ui_state == UI_STATE_SET_ALARM_MINUTES && !blink_state)
+            sprintf(a_mins_buf, "  ");
+        else
+            sprintf(a_mins_buf, "%02d", edit_alarm.minutes);
+
+        if (ui_state == UI_STATE_SET_ALARM_ENABLE && !blink_state)
+            sprintf(a_en_buf, "   ");
+        else
+            sprintf(a_en_buf, edit_alarm.enabled ? "ON " : "OFF");
+
+        sprintf(time_str, "ALM: %s:%s", a_hrs_buf, a_mins_buf);
+        sprintf(date_str, "STATE: %s", a_en_buf);
+
+        SH1106_Clear();
+        SH1106_SetCursor(25, 4);
+        SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
+
+        SH1106_SetCursor(29, 22);
+        SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
+
+        SH1106_SetCursor(18, 42);
+        SH1106_WriteString("[SET ALARM]", Font_7x10, SH1106_COLOR_WHITE);
 
         SH1106_UpdateScreen(ui_i2c);
     }

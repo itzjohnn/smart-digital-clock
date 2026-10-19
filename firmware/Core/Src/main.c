@@ -248,6 +248,36 @@ int main(void)
       UI_ProcessButtons(btn1_pressed, btn2_pressed, btn3_pressed, btn4_pressed);
     }
 
+    // Telemetry and Alarm Evaluation
+    if (UI_GetState() == UI_STATE_CLOCK)
+    {
+      DS3231_GetTime(&hi2c1, &current_time);
+
+      // Check if alarm time matched
+      UI_CheckAlarm(&current_time);
+
+      if (current_time.seconds != last_second)
+      {
+        last_second = current_time.seconds;
+
+        if (current_time.seconds % 2 == 0)
+        {
+          dht_status = DHT11_Read(&climate_data);
+        }
+      }
+    }
+
+    // Automatic wake if alarm just fired while asleep
+    if (is_sleeping && UI_IsAlarmTriggered())
+    {
+      is_sleeping = 0;
+      SH1106_SetSleep(&hi2c1, 0);
+      dark_start_tick = HAL_GetTick();
+    }
+
+    // Service non-blocking buzzer
+    UI_ServiceAlarmBuzzer();
+
     // Ambient Light & Dynamic Display Contrast
     HAL_ADC_Start(&hadc);
     if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK)
@@ -305,25 +335,6 @@ int main(void)
       SH1106_SetContrast(&hi2c1, current_contrast);
     }
   }
-
-    // Telemetry Sampling (Clock Mode Only)
-    if (UI_GetState() == UI_STATE_CLOCK)
-    {
-      // Poll live time from RTC
-      DS3231_GetTime(&hi2c1, &current_time);
-
-      // Only update the OLED when the second tick actually changes
-      if (current_time.seconds != last_second)
-      {
-        last_second = current_time.seconds;
-
-        // Sample DHT11 every 2 seconds
-        if (current_time.seconds % 2 == 0)
-        {
-          dht_status = DHT11_Read(&climate_data);
-        }
-      }
-    }
 
     // Render Active Screen (only when display is awake)
     if (!is_sleeping)
