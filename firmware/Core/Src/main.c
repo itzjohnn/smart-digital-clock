@@ -84,6 +84,11 @@ uint8_t prev_btn2 = 1;
 uint8_t prev_btn3 = 1;
 uint8_t prev_btn4 = 1;
 
+// Display sleep / screen-saver tracking
+uint8_t is_sleeping = 0;
+uint32_t dark_start_tick = 0;
+#define SLEEP_TIMEOUT_MS  30000 // 30 seconds of darkness before sleep
+
 
 /* USER CODE END PV */
 
@@ -165,10 +170,9 @@ int main(void)
     }
   }
 
-  /* Visual Pass/Fail Indication
-  // If at least 2 devices ACK (OLED and RTC), blink PC9 (Green LED) 5 times rapidly.
-  // If fewer than 2 devices reply, toggle PC8 (Blue LED) rapidly as a warning.
-  */
+  // Visual Pass/Fail Indication
+  // If at least 2 devices ACK (OLED and RTC), blink PC9 (Green LED) 5 times rapidly
+  // If fewer than 2 devices reply, toggle PC8 (Blue LED) rapidly as a warning
   if (found_devices >= 2)
   {
     for (int i = 0; i < 5; i++)
@@ -227,9 +231,22 @@ int main(void)
     prev_btn2 = raw_btn2;
     prev_btn3 = raw_btn3;
     prev_btn4 = raw_btn4;
+    
+    // Detects button press to wake up and flash screen
+    uint8_t any_button_pressed = (btn1_pressed || btn2_pressed || btn3_pressed || btn4_pressed);
 
-    // Send button events to UI state machine
-    UI_ProcessButtons(btn1_pressed, btn2_pressed, btn3_pressed, btn4_pressed);
+    // If sleeping and a button was pressed, wake up and ignore menu action for this click
+    if (is_sleeping && any_button_pressed)
+    {
+      is_sleeping = 0;
+      SH1106_SetSleep(&hi2c1, 0);
+      dark_start_tick = HAL_GetTick(); // Reset dark timer
+    }
+    else if (!is_sleeping)
+    {
+      // Send button events to UI state machine normally
+      UI_ProcessButtons(btn1_pressed, btn2_pressed, btn3_pressed, btn4_pressed);
+    }
 
     // Ambient Light & Dynamic Display Contrast
     HAL_ADC_Start(&hadc);
@@ -239,7 +256,34 @@ int main(void)
     }
     HAL_ADC_Stop(&hadc);
 
+    if (adc_val < 800)
+    {
+      // Tracks how long darkness persists
+      if (dark_start_tick == 0)
+      {
+        dark_start_tick = HAL_GetTick();
+      }
+      else if (!is_sleeping && (HAL_GetTick() - dark_start_tick >= SLEEP_TIMEOUT_MS))
+      {
+        // Dark threshold exceeded; display enters deep sleep
+        is_sleeping = 1;
+        SH1106_SetSleep(&hi2c1, 1);
+      }
+    }
+      else
+      {
+        // Room has light; reset timer and display wakes up if asleep
+        dark_start_tick = 0;
+        if (is_sleeping)
+        {
+          is_sleeping = 0;
+          SH1106_SetSleep(&hi2c1, 0);
+        }
+      }
+
     // Map 12-bit ADC (0 to 4095) into 3 discrete contrast tiers
+  if (!is_sleeping)
+  {
     uint8_t target_contrast;
     if (adc_val < 800)
     {
@@ -260,6 +304,7 @@ int main(void)
       current_contrast = target_contrast;
       SH1106_SetContrast(&hi2c1, current_contrast);
     }
+  }
 
     // Telemetry Sampling (Clock Mode Only)
     if (UI_GetState() == UI_STATE_CLOCK)
@@ -280,8 +325,11 @@ int main(void)
       }
     }
 
-    // Render Active Screen
+    // Render Active Screen (only when display is awake)
+    if (!is_sleeping)
+    {
     UI_Update(&current_time, &climate_data, dht_status);
+    }
 
     // Fast responsive polling delay for tactile debounce
     HAL_Delay(20);
