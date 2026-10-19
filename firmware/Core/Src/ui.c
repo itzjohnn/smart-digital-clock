@@ -1,6 +1,25 @@
 #include "ui.h"
 #include <stdio.h>
 
+// 3-letter weekday lookup table (0 = SUN, 1 = MON, ..., 6 = SAT)
+static const char *const DAY_NAMES[] =
+{
+    "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"
+};
+
+// Sakamoto's algorithm for calculating day of week
+// Returns: 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+static uint8_t UI_CalculateDayOfWeek(uint8_t day, uint8_t month, uint16_t year)
+{
+    static const uint8_t t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (month < 3)
+    {
+        year -= 1;
+    }
+    return (year + year / 4 - year / 100 + year / 400 + t[month - 1] + day) % 7;
+}
+
+
 // Hardware interface handle
 static I2C_HandleTypeDef *ui_i2c = NULL;
 
@@ -121,8 +140,11 @@ void UI_ProcessButtons(uint8_t btn1_pressed, uint8_t btn2_pressed,
     {
         if (ui_state != UI_STATE_CLOCK)
         {
-            // Reset seconds to 00 on commit and save to RTC
+            // Reset seconds to 00 and calculate 1-indexed day of week (1 = Sunday)
             edit_time.seconds = 0;
+            edit_time.day_of_week = UI_CalculateDayOfWeek(edit_time.day_of_month, 
+                                                          edit_time.month, 
+                                                          2000 + edit_time.year) + 1;
             DS3231_SetTime(ui_i2c, &edit_time);
             ui_state = UI_STATE_CLOCK;
 
@@ -154,8 +176,12 @@ void UI_Update(const DS3231_Time_t *current_time, const DHT11_Data_t *climate, H
         {
             last_second = current_time->seconds;
 
+            uint8_t dow = UI_CalculateDayOfWeek(current_time->day_of_month, 
+                                                 current_time->month, 
+                                                 2000 + current_time->year);
+
             sprintf(time_str, "%02d:%02d:%02d", current_time->hours, current_time->minutes, current_time->seconds);
-            sprintf(date_str, "%02d/%02d/20%02d", current_time->month, current_time->day_of_month, current_time->year);
+            sprintf(date_str, "%s  %02d/%02d/%02d", DAY_NAMES[dow], current_time->month, current_time->day_of_month, current_time->year);
 
             if (dht_status == HAL_OK)
             {
@@ -174,7 +200,7 @@ void UI_Update(const DS3231_Time_t *current_time, const DHT11_Data_t *climate, H
             SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
 
             // Row 2: Date (Centered)
-            SH1106_SetCursor(29, 22);
+            SH1106_SetCursor(18, 22);
             SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
 
             // Row 3: Climate Sensor Readings (Centered)
@@ -224,7 +250,11 @@ void UI_Update(const DS3231_Time_t *current_time, const DHT11_Data_t *climate, H
         else
             sprintf(yr_buf, "%02d", edit_time.year);
 
-        sprintf(date_str, "%s/%s/20%s", mo_buf, day_buf, yr_buf);
+        uint8_t edit_dow = UI_CalculateDayOfWeek(edit_time.day_of_month, 
+                                                edit_time.month, 
+                                                2000 + edit_time.year);
+            
+        sprintf(date_str, "%s  %s/%s/%s", DAY_NAMES[edit_dow], mo_buf, day_buf, yr_buf);
 
         // Render Edit Mode UI
         SH1106_Clear();
@@ -232,7 +262,7 @@ void UI_Update(const DS3231_Time_t *current_time, const DHT11_Data_t *climate, H
         SH1106_SetCursor(36, 4);
         SH1106_WriteString(time_str, Font_7x10, SH1106_COLOR_WHITE);
 
-        SH1106_SetCursor(29, 22);
+        SH1106_SetCursor(18, 22);
         SH1106_WriteString(date_str, Font_7x10, SH1106_COLOR_WHITE);
 
         SH1106_SetCursor(22, 42);
